@@ -1,0 +1,69 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Environments
+venv/
+.venv/
+env/
+ENV/
+Miniconda3-latest-Linux-x86_64.sh
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+
+# ROS / bags / sensor data
+*.bag
+*.db3
+*.mcap
+metadata.yaml
+
+# Point cloud / mesh large outputs
+*.pcd
+*.ply
+*.obj
+*.stl
+*.glb
+*.gltf
+*.las
+*.laz
+
+# Images / videos outputs
+*.png
+*.jpg
+*.jpeg
+*.mp4
+*.mov
+*.avi
+
+# Numpy / pose outputs
+*.npy
+*.npz
+
+# Logs
+*.log
+
+# Local data and generated outputs
+data/
+outputs/
+
+# Secrets
+.env
+*.key
+secrets/
+
+# Keep folder structure
+!data/
+!data/**/
+!data/**/.gitkeep
+
+!outputs/
+!outputs/**/
+!outputs/**/.gitkeep
