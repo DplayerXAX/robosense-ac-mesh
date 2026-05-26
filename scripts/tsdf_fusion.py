@@ -51,35 +51,56 @@ def pointcloud_to_rgbd_from_world_pcd(
     depth_trunc=20.0,
 ):
     """
-    Convert the point cloud in world coordinates back to the sensor local frame based on the pose,
-    then project it into a depth image + color image, to feed into Open3D TSDF.
+    Convert one LiDAR-frame colored point cloud into a virtual RGBD image,
+    so it can be integrated into Open3D TSDF.
 
-    Note:
-    Open3D TSDF integrate() natively takes RGBD images, not point clouds directly.
-    So here we perform a point cloud -> virtual RGBD conversion.
+    Important assumption:
+        The input PLY point cloud is in LiDAR local frame, not world frame.
+
+    LiDAR coordinate convention assumed here:
+        lidar_x = forward / depth
+        lidar_y = left/right
+        lidar_z = up
+
+    Virtual camera coordinate convention used for Open3D RGBD:
+        cam_x = right
+        cam_y = down
+        cam_z = forward / depth
+
+    Conversion:
+        cam_x = -lidar_y
+        cam_y = -lidar_z
+        cam_z =  lidar_x
     """
 
-    points_world = np.asarray(pcd_world.points)
+    points_lidar = np.asarray(pcd_world.points)
 
-    if len(points_world) == 0:
+    if len(points_lidar) == 0:
         return None, None
 
     if pcd_world.has_colors():
         colors = np.asarray(pcd_world.colors)
     else:
-        colors = np.ones_like(points_world) * 0.7
+        colors = np.ones_like(points_lidar) * 0.7
 
-    # world -> sensor
-    T_world_to_sensor = np.linalg.inv(T_sensor_to_world)
+    points_sensor = np.empty_like(points_lidar)
 
-    points_h = np.hstack([points_world, np.ones((len(points_world), 1))])
-    points_sensor = (T_world_to_sensor @ points_h.T).T[:, :3]
+    # camera right  = - lidar left/right
+    points_sensor[:, 0] = -points_lidar[:, 1]
+
+    # camera down   = - lidar up
+    points_sensor[:, 1] = -points_lidar[:, 2]
+
+    # camera depth  = lidar forward
+    points_sensor[:, 2] = points_lidar[:, 0]
 
     x = points_sensor[:, 0]
     y = points_sensor[:, 1]
     z = points_sensor[:, 2]
 
-    valid = z > 0.1
+    # z is now real depth
+    valid = np.isfinite(points_sensor).all(axis=1)
+    valid &= z > 0.1
     valid &= z < depth_trunc
 
     x = x[valid]
@@ -90,6 +111,7 @@ def pointcloud_to_rgbd_from_world_pcd(
     if len(z) == 0:
         return None, None
 
+    # Project to virtual pinhole image
     u = np.round((fx * x / z) + cx).astype(np.int32)
     v = np.round((fy * y / z) + cy).astype(np.int32)
 
@@ -106,6 +128,9 @@ def pointcloud_to_rgbd_from_world_pcd(
     depth = np.zeros((height, width), dtype=np.float32)
     color = np.zeros((height, width, 3), dtype=np.uint8)
 
+    # Z-buffer:
+    # If multiple points project to the same pixel,
+    # keep the closest one.
     for ui, vi, zi, ci in zip(u, v, z, c):
         old_z = depth[vi, ui]
         if old_z == 0 or zi < old_z:

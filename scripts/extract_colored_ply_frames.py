@@ -5,7 +5,7 @@ import numpy as np
 import open3d as o3d
 
 
-BAG_PATH = Path("colored_bag/ac_colored_points.bag")
+BAG_PATH = Path("../colored_bag/ac_colored_points.bag")
 POINT_TOPIC = "/rslidar_points_motion_rgb"
 
 OUT_DIR = Path("colored_ply_frames")

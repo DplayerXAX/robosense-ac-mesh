@@ -14,7 +14,7 @@ with open(poses_file) as f:
         T = np.eye(4)
         T[:3, :4] = np.array(line.strip().split(), dtype=np.float64).reshape(3, 4)
         poses.append(T)
-print(f"读取了 {len(poses)} 个位姿")
+print(f"read {len(poses)} poses")
 
 merged = o3d.geometry.PointCloud()
 voxel_size = 0.05  
@@ -46,10 +46,10 @@ with AnyReader([bag_path]) as reader:
         
         if i % 30 == 0:
             merged = merged.voxel_down_sample(voxel_size)
-            print(f"  帧 {i}/{len(poses)}  累计点数: {len(merged.points)}")
+            print(f"  frame {i}/{len(poses)}  points: {len(merged.points)}")
 
 merged = merged.voxel_down_sample(voxel_size)
-print(f"\n最终点数: {len(merged.points)}")
+print(f"\nfinal points: {len(merged.points)}")
 
 o3d.io.write_point_cloud(output, merged)
-print(f"保存到: {output}")
+print(f"save to: {output}")
