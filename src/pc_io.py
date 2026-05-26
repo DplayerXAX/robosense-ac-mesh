@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """
-公用点云读写。重点解决 FAST-LIVO / PCL 输出的 packed RGB 字段
-被 Open3D 读不出来的问题。
+Shared point cloud IO. Primarily solves the problem of FAST-LIVO / PCL
+packed-RGB fields not being read by Open3D.
 
-FAST-LIVO 存 RGB 时常把颜色打包进一个名为 `rgb` 的 float32 字段
-（24-bit RGB 塞进 float 的尾数），Open3D 的 read_point_cloud 对
-这种格式兼容性时好时坏：有时返回 has_colors()=False，有时颜色全黑。
+When storing RGB, FAST-LIVO often packs the color into a single float32 field
+named `rgb` (24-bit RGB stuffed into the float mantissa). Open3D's
+read_point_cloud has inconsistent support for this format: sometimes it returns
+has_colors()=False, sometimes the colors come out all black.
 
-本模块的 read_colored_cloud() 会：
-  1. 先用 Open3D 正常读
-  2. 如果没读到颜色，回退到手动解析 PLY/PCD 的 packed rgb
+read_colored_cloud() here:
+  1. Reads normally with Open3D first
+  2. If no color is found, falls back to manually parsing the PLY/PCD packed rgb
 """
 
 from pathlib import Path
@@ -19,7 +20,7 @@ import open3d as o3d
 
 
 def _unpack_rgb_float(rgb_float):
-    """把 packed float32 RGB 解成 (N,3) 的 0~1 颜色。"""
+    """Unpack packed float32 RGB into (N,3) colors in 0~1 range."""
     rgb_uint = rgb_float.astype(np.float32).view(np.uint32)
     r = ((rgb_uint >> 16) & 255).astype(np.float64) / 255.0
     g = ((rgb_uint >> 8) & 255).astype(np.float64) / 255.0
@@ -29,8 +30,9 @@ def _unpack_rgb_float(rgb_float):
 
 def _try_manual_pcd_rgb(path):
     """
-    手动解析 ASCII / binary PCD 的 packed rgb 字段。
-    只在 Open3D 没读到颜色时作为回退。返回 (points, colors) 或 None。
+    Manually parse the packed rgb field of an ASCII PCD.
+    Only used as a fallback when Open3D fails to read colors.
+    Returns (points, colors) or None.
     """
     path = Path(path)
     with open(path, "rb") as f:
@@ -51,12 +53,12 @@ def _try_manual_pcd_rgb(path):
 
         fields = header.get("FIELDS", [])
         if "rgb" not in fields and "rgba" not in fields:
-            return None  # 没有 packed rgb，交给 Open3D
+            return None  # no packed rgb, leave it to Open3D
 
         data_type = header.get("DATA", ["ascii"])[0]
         n_points = int(header.get("POINTS", [0])[0])
 
-        # 简单情形：ASCII。binary 的话直接交回 Open3D 处理 xyz，颜色另说
+        # Simple case: ASCII. For binary, hand xyz back to Open3D; color is separate
         if data_type != "ascii":
             return None
 
@@ -81,8 +83,8 @@ def _try_manual_pcd_rgb(path):
 
 def read_colored_cloud(path, verbose=True):
     """
-    读取点云，尽最大努力拿到颜色。
-    返回 open3d.geometry.PointCloud。
+    Read a point cloud, making a best effort to obtain colors.
+    Returns an open3d.geometry.PointCloud.
     """
     path = str(path)
     pcd = o3d.io.read_point_cloud(path)
@@ -90,14 +92,14 @@ def read_colored_cloud(path, verbose=True):
     has_real_color = pcd.has_colors()
     if has_real_color:
         cols = np.asarray(pcd.colors)
-        # 颜色全相同/全黑 = 实际没读到
+        # all-same / all-black = effectively no color
         if cols.size and (np.allclose(cols.min(0), cols.max(0))
                           or cols.max() < 0.02):
             has_real_color = False
 
     if not has_real_color:
         if verbose:
-            print(f"  [pc_io] Open3D 没读到有效颜色，尝试手动解 packed rgb...")
+            print("  [pc_io] Open3D found no valid color, trying manual packed rgb...")
         manual = _try_manual_pcd_rgb(path)
         if manual is not None:
             pts, colors = manual
@@ -105,14 +107,14 @@ def read_colored_cloud(path, verbose=True):
             pcd2.points = o3d.utility.Vector3dVector(pts)
             pcd2.colors = o3d.utility.Vector3dVector(colors)
             if verbose:
-                print(f"  [pc_io] 手动解析成功，{len(pts)} 点带颜色。")
+                print(f"  [pc_io] Manual parse OK, {len(pts)} colored points.")
             return pcd2
         elif verbose:
-            print(f"  [pc_io] 手动解析未成功（可能是 binary PCD）。")
-            print(f"  [pc_io] 建议：优先用 .ply 版本，PLY 的颜色字段更标准。")
+            print("  [pc_io] Manual parse failed (likely a binary PCD).")
+            print("  [pc_io] Tip: prefer the .ply version, its color fields are more standard.")
 
     if verbose:
-        print(f"  [pc_io] 读到 {len(pcd.points)} 点, has_color={pcd.has_colors()}")
+        print(f"  [pc_io] Read {len(pcd.points)} points, has_color={pcd.has_colors()}")
     return pcd
 
 

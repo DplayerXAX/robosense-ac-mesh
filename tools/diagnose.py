@@ -1,14 +1,15 @@
 #!/usr/bin/env python3
 """
-诊断 FAST-LIVO 输出的点云：颜色读不读得到、点数、尺度、密度。
+Diagnose a FAST-LIVO output cloud: whether color is readable, point count,
+scale, density.
 
-这是建彩色 mesh 前的命门检查 —— Open3D 对 PCL 的 packed rgb 字段
-兼容性时好时坏，先确认颜色能读到，再谈建网格。
+This is the critical check before building a colored mesh -- Open3D's support
+for PCL packed rgb is hit or miss, so confirm color reads first, then mesh.
 
-用法:
-    python diagnose_pointcloud.py PCD/rgb_map_voxel_0.030000.ply
-    python diagnose_pointcloud.py PCD/rgb_map.pcd
-    # 不传参数则自动扫描当前目录和 ./PCD 下的 rgb_*.ply / rgb_*.pcd
+Usage:
+    python diagnose.py PCD/rgb_map_voxel_0.030000.ply
+    python diagnose.py PCD/rgb_map.pcd
+    # no arg: auto-scan current dir and ./PCD for rgb_*.ply / rgb_*.pcd
 """
 
 import sys
@@ -22,60 +23,60 @@ import open3d as o3d
 def diagnose(path):
     path = Path(path)
     print("=" * 64)
-    print(f"文件: {path}")
-    print(f"大小: {path.stat().st_size / 1e6:.1f} MB")
+    print(f"file: {path}")
+    print(f"size: {path.stat().st_size / 1e6:.1f} MB")
     print("-" * 64)
 
     pcd = o3d.io.read_point_cloud(str(path))
 
     n = len(pcd.points)
-    print(f"点数:        {n:,}")
-    print(f"有颜色:      {pcd.has_colors()}")
-    print(f"有法线:      {pcd.has_normals()}")
+    print(f"points:      {n:,}")
+    print(f"has color:   {pcd.has_colors()}")
+    print(f"has normals: {pcd.has_normals()}")
 
     if n == 0:
-        print("⚠️  读到 0 个点 —— Open3D 没能解析这个文件！")
-        print("    建议改用 .ply 版本，或用 PCL 转一道。")
+        print("WARNING: read 0 points -- Open3D failed to parse this file!")
+        print("         Try the .ply version, or convert via PCL.")
         return
 
-    # 颜色检查（命门）
+    # color check (the critical one)
     if pcd.has_colors():
         cols = np.asarray(pcd.colors)
         cmin = cols.min(axis=0)
         cmax = cols.max(axis=0)
         cmean = cols.mean(axis=0)
-        print(f"颜色范围:    min={cmin.round(3)} max={cmax.round(3)}")
-        print(f"颜色均值:    {cmean.round(3)}")
-        # 全 0 或全相同 = 实际上没颜色
+        print(f"color range: min={cmin.round(3)} max={cmax.round(3)}")
+        print(f"color mean:  {cmean.round(3)}")
+        # all 0 or all identical = effectively no color
         if np.allclose(cmin, cmax):
-            print("⚠️  所有点颜色相同 —— 等于没颜色，可能颜色字段没读对！")
+            print("WARNING: all points same color -- effectively no color, field may be misread!")
         elif cmax.max() < 0.02:
-            print("⚠️  颜色几乎全黑 —— 可能 packed rgb 解码错误！")
+            print("WARNING: color almost all black -- packed rgb decode may be wrong!")
         else:
-            print("✅ 颜色看起来正常。")
+            print("OK: color looks normal.")
     else:
-        print("⚠️  Open3D 没读到颜色字段！")
-        print("    如果这是 rgb_map，说明 packed rgb 没被识别。")
-        print("    解决：优先用 .ply 版本；或用下面的 PCL header 检查字段名。")
+        print("WARNING: Open3D found no color field!")
+        print("    If this is rgb_map, the packed rgb was not recognized.")
+        print("    Fix: prefer the .ply version; or check field names via PCL header.")
 
-    # 尺度 / 密度
+    # scale / density
     bbox = pcd.get_axis_aligned_bounding_box()
     extent = bbox.get_extent()
-    print(f"包围盒尺寸:  X={extent[0]:.2f}m  Y={extent[1]:.2f}m  Z={extent[2]:.2f}m")
+    print(f"bbox size:   X={extent[0]:.2f}m  Y={extent[1]:.2f}m  Z={extent[2]:.2f}m")
 
-    # 估算平均点间距（采样 2000 点算最近邻）
+    # estimate mean point spacing (sample 2000 points, nearest neighbor)
     sample_n = min(2000, n)
     idx = np.random.choice(n, sample_n, replace=False)
     pts = np.asarray(pcd.points)
     tree = o3d.geometry.KDTreeFlann(pcd)
     dists = []
     for i in idx:
-        _, _, d2 = tree.search_knn_vector_3d(pts[i], 2)  # 最近的非自身点
+        _, _, d2 = tree.search_knn_vector_3d(pts[i], 2)  # nearest non-self point
         if len(d2) > 1:
             dists.append(np.sqrt(d2[1]))
     if dists:
         med = np.median(dists)
-        print(f"中位点间距:  {med*100:.2f} cm  （建网格的 BPA 半径/Poisson 参数据此定）")
+        print(f"median spacing: {med*100:.2f} cm  (use for BPA radius / Poisson params)")
 
     print()
 
@@ -84,24 +85,24 @@ def main():
     if len(sys.argv) > 1:
         targets = sys.argv[1:]
     else:
-        # 自动找 rgb 文件，优先 ply
+        # auto-find rgb files, prefer ply
         targets = []
         for pat in ("rgb_*.ply", "PCD/rgb_*.ply", "rgb_*.pcd", "PCD/rgb_*.pcd"):
             targets += sorted(glob.glob(pat))
-        # 去重保序
+        # dedupe, keep order
         seen = set()
         targets = [t for t in targets if not (t in seen or seen.add(t))]
         if not targets:
-            print("没找到 rgb_*.ply / rgb_*.pcd，请手动传入路径：")
-            print("  python diagnose_pointcloud.py PCD/rgb_map_voxel_0.030000.ply")
+            print("No rgb_*.ply / rgb_*.pcd found, pass a path manually:")
+            print("  python diagnose.py PCD/rgb_map_voxel_0.030000.ply")
             return
 
     for t in targets:
         diagnose(t)
 
     print("=" * 64)
-    print("下一步：把上面的输出贴回来，我据此配建网格参数。")
-    print("       重点看 rgb_map_voxel_0.030000.ply 的『有颜色』和『中位点间距』。")
+    print("Next: paste the output back, parameters can be tuned from it.")
+    print("      Focus on 'has color' and 'median spacing' of rgb_map_voxel_0.030000.ply.")
 
 
 if __name__ == "__main__":

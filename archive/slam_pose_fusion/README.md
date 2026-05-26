@@ -1,16 +1,19 @@
-# 归档：KISS-ICP / 外部 pose 融合路线
+# Archived: KISS-ICP / external pose fusion route
 
-中期尝试：用外部 SLAM（KISS-ICP）出 pose（KITTI txt），再手动按 pose
-融合点云帧、或喂 TSDF。
+An intermediate attempt: use an external SLAM (KISS-ICP) to produce poses
+(KITTI txt), then manually fuse cloud frames by pose, or feed a TSDF.
 
-**为什么归档**：后来改用 FAST-LIVO，它是 LiDAR-惯性-视觉紧耦合，直接输出
-全局彩色点云，不再需要手动按 pose 融合。这套不再是主线。
+**Why archived**: the project later switched to FAST-LIVO, a tightly-coupled
+LiDAR-Inertial-Visual system that directly outputs a global colored cloud, so
+manual pose-based fusion is no longer needed. This route is no longer the main line.
 
-已知问题（保留备查）：
-- merge_with_pose.py 只读 xyz 丢颜色，且用危险的 point_step//4 读法
-- 按 index 套 pose 假设帧数与 pose 数严格一致，未做时间戳对齐
-- tsdf_fusion.py 的坐标系约定（LiDAR local）需输入是每帧局部 PLY，非全局图
+Known issues (kept for reference):
+- merge_with_pose.py reads only xyz and drops color, and uses an unsafe
+  point_step//4 reading; correct reading is in src/pc_io.py
+- it assumes frame index == pose index, with no timestamp alignment
+- tsdf_fusion.py's coordinate convention (LiDAR local) expects per-frame local
+  PLY input, not a fused global map
 
-- merge_with_pose.py — 按 KITTI pose 融合点云
-- scan.py           — 读 pose 算法线方向 + Poisson
-- tsdf_fusion.py    — 每帧 PLY + pose 投影成虚拟 RGBD 做 TSDF
+- merge_with_pose.py — fuse clouds by KITTI pose
+- scan.py           — derive normal orientation from poses + Poisson
+- tsdf_fusion.py    — project per-frame PLY + pose into virtual RGBD for TSDF

@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """
-检查 ROS bag：topic 列表、频率、PointCloud2 字段、IMU 样本。
-合并了原来的 info.py / inspect_bag_topics.py / inspect_pointcloud_fields.py / check.py。
+Inspect a ROS bag: topic list, frequency, PointCloud2 fields, IMU sample.
+Merges the original info.py / inspect_bag_topics.py /
+inspect_pointcloud_fields.py / check.py.
 
-注意：现在主线用 FAST-LIVO 成品点云，这个工具主要用于调试原始 bag，
-      平时不需要。
+Note: the main pipeline now uses FAST-LIVO finished clouds, so this tool is
+      mainly for debugging raw bags and is not normally needed.
 
-用法:
-    python inspect_bag.py <bag_path>                 # 概览
-    python inspect_bag.py <bag_path> --fields        # 看 PointCloud2 字段
-    python inspect_bag.py <bag_path> --imu           # 看 IMU 样本
+Usage:
+    python inspect_bag.py <bag_path>                 # overview
+    python inspect_bag.py <bag_path> --fields        # PointCloud2 fields
+    python inspect_bag.py <bag_path> --imu           # IMU sample
 """
 
 import argparse
@@ -23,7 +24,7 @@ DTYPE = {1: "INT8", 2: "UINT8", 3: "INT16", 4: "UINT16",
 
 def overview(reader):
     dur = reader.duration / 1e9
-    print(f"时长: {dur:.2f}s  消息数: {reader.message_count}")
+    print(f"duration: {dur:.2f}s  messages: {reader.message_count}")
     print(f"{'Topic':<40}{'Type':<42}{'Count':>8}{'Hz':>8}")
     print("-" * 98)
     for c in reader.connections:
@@ -34,7 +35,7 @@ def overview(reader):
 def show_fields(reader, topic):
     conns = [c for c in reader.connections if c.topic == topic]
     if not conns:
-        # 没指定就找第一个 PointCloud2
+        # if not specified, find the first PointCloud2
         conns = [c for c in reader.connections if "PointCloud2" in c.msgtype][:1]
     for conn in conns:
         for _, _, raw in reader.messages(connections=[conn]):

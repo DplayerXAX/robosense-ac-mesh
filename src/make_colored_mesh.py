@@ -1,22 +1,23 @@
 #!/usr/bin/env python3
 """
-第 2 步：从清理后的彩色点云建 mesh，并保留顶点颜色。
+Step 2: reconstruct a mesh from the cleaned colored cloud, keeping vertex colors.
 
-重写自旧 make_mesh.py，主要改动:
-  1. 参数适配 FAST-LIVO 3cm 数据（旧版 VOXEL=0.08 会再糊一层）
-  2. Poisson depth 默认 11（室内更清晰，旧 make_mesh 用 10 偏糊）
-  3. 输出 .ply 而非 .obj —— PLY 存顶点色，STL/OBJ 不方便
-  4. 支持 Poisson 和 Ball Pivoting 两种算法切换
-  5. 显式保证颜色传到 mesh 顶点（Poisson 通常自带，BPA 需手动转色）
+Rewritten from the old make_mesh.py. Key changes:
+  1. Parameters tuned for FAST-LIVO 3cm data (old VOXEL=0.08 blurred it again)
+  2. Poisson depth defaults to 11 (sharper indoors; old make_mesh used 10, blurry)
+  3. Outputs .ply instead of .obj -- PLY stores vertex colors, STL/OBJ awkward
+  4. Supports both Poisson and Ball Pivoting
+  5. Explicitly ensures colors reach mesh vertices (Poisson usually carries them,
+     BPA needs a manual color transfer)
 
-用法:
-    # Poisson（默认，室内推荐）
+Usage:
+    # Poisson (default, recommended indoors)
     python make_colored_mesh.py \
         --input outputs/processed/global_colored_clean.ply \
         --out outputs/mesh/colored_mesh.ply \
         --method poisson --depth 11
 
-    # Ball Pivoting（表面型点云，不易造假面）
+    # Ball Pivoting (surface-like clouds, avoids fake faces)
     python make_colored_mesh.py \
         --input outputs/processed/global_colored_clean.ply \
         --method bpa
@@ -34,9 +35,9 @@ from pc_io import read_colored_cloud, write_mesh
 
 
 def transfer_colors(mesh, pcd):
-    """把点云颜色用最近邻转到 mesh 顶点（BPA 后需要）。"""
+    """Transfer cloud colors to mesh vertices via nearest neighbor (needed after BPA)."""
     if not pcd.has_colors():
-        print("  点云没颜色，跳过转色")
+        print("  cloud has no color, skipping transfer")
         return mesh
     tree = o3d.geometry.KDTreeFlann(pcd)
     pts_colors = np.asarray(pcd.colors)
@@ -46,42 +47,42 @@ def transfer_colors(mesh, pcd):
         _, idx, _ = tree.search_knn_vector_3d(v, 1)
         vcolors[i] = pts_colors[idx[0]]
     mesh.vertex_colors = o3d.utility.Vector3dVector(vcolors)
-    print(f"  已转色到 {len(verts):,} 个顶点")
+    print(f"  transferred color to {len(verts):,} vertices")
     return mesh
 
 
 def poisson_reconstruct(pcd, depth, density_quantile):
-    print(f"  Poisson 重建 depth={depth} ...")
+    print(f"  Poisson reconstruction depth={depth} ...")
     mesh, densities = o3d.geometry.TriangleMesh.create_from_point_cloud_poisson(
         pcd, depth=depth, n_threads=-1)
-    print(f"  原始 mesh: {len(mesh.triangles):,} 三角面")
+    print(f"  raw mesh: {len(mesh.triangles):,} triangles")
 
-    # 按密度裁掉低置信区域（Poisson 在稀疏处会造假面）
+    # crop low-confidence regions by density (Poisson invents faces in sparse areas)
     densities = np.asarray(densities)
     thr = np.quantile(densities, density_quantile)
     mesh.remove_vertices_by_mask(densities < thr)
-    print(f"  密度裁剪后: {len(mesh.triangles):,} 三角面")
+    print(f"  after density crop: {len(mesh.triangles):,} triangles")
     return mesh
 
 
 def bpa_reconstruct(pcd, voxel):
-    # 半径取点间距的 2/3/4 倍（README 第 9.1 节建议）
+    # radii at 2/3/4x point spacing (README section 9.1 suggestion)
     radii = [voxel * k for k in (2, 3, 4)]
-    print(f"  Ball Pivoting 半径: {radii}")
+    print(f"  Ball Pivoting radii: {radii}")
     mesh = o3d.geometry.TriangleMesh.create_from_point_cloud_ball_pivoting(
         pcd, o3d.utility.DoubleVector(radii))
-    print(f"  BPA mesh: {len(mesh.triangles):,} 三角面")
+    print(f"  BPA mesh: {len(mesh.triangles):,} triangles")
     return mesh
 
 
 def clean_mesh(mesh, min_cluster_tris):
-    print("  清理 mesh ...")
+    print("  cleaning mesh ...")
     mesh.remove_degenerate_triangles()
     mesh.remove_duplicated_triangles()
     mesh.remove_duplicated_vertices()
     mesh.remove_non_manifold_edges()
 
-    # 去掉小碎片
+    # drop small fragments
     clusters, n_tris, _ = mesh.cluster_connected_triangles()
     clusters = np.asarray(clusters)
     n_tris = np.asarray(n_tris)
@@ -97,40 +98,40 @@ def main():
     ap.add_argument("--input", required=True)
     ap.add_argument("--out", default="outputs/mesh/colored_mesh.ply")
     ap.add_argument("--method", choices=["poisson", "bpa"], default="poisson")
-    ap.add_argument("--depth", type=int, default=11, help="Poisson 深度，室内 11")
+    ap.add_argument("--depth", type=int, default=11, help="Poisson depth, 11 for indoors")
     ap.add_argument("--density_quantile", type=float, default=0.05,
-                    help="Poisson 裁掉密度最低的这一比例")
+                    help="Poisson: crop this fraction of lowest density")
     ap.add_argument("--voxel", type=float, default=0.03,
-                    help="BPA 半径基准（≈点间距）")
+                    help="BPA radius base (approx point spacing)")
     ap.add_argument("--min_cluster_tris", type=int, default=2000)
     ap.add_argument("--simplify", type=int, default=0,
-                    help=">0 则额外输出简化版（Unity/Unreal 用），值为目标面数")
+                    help=">0 also outputs a decimated version (for Unity/Unreal), value = target triangle count")
     args = ap.parse_args()
 
-    print(f"[1/4] 读取点云 {args.input}")
+    print(f"[1/4] reading cloud {args.input}")
     pcd = read_colored_cloud(args.input)
-    print(f"      点数 {len(pcd.points):,}, has_color={pcd.has_colors()}")
+    print(f"      points {len(pcd.points):,}, has_color={pcd.has_colors()}")
 
     if not pcd.has_normals():
-        print("      点云无法线，估计法线...")
+        print("      cloud has no normals, estimating...")
         pcd.estimate_normals(o3d.geometry.KDTreeSearchParamHybrid(
             radius=args.voxel * 3, max_nn=30))
         pcd.orient_normals_consistent_tangent_plane(30)
 
-    print(f"[2/4] {args.method} 重建")
+    print(f"[2/4] {args.method} reconstruction")
     if args.method == "poisson":
         mesh = poisson_reconstruct(pcd, args.depth, args.density_quantile)
     else:
         mesh = bpa_reconstruct(pcd, args.voxel)
 
-    print("[3/4] 清理 + 保色")
+    print("[3/4] cleaning + keeping color")
     mesh = clean_mesh(mesh, args.min_cluster_tris)
-    # Poisson 顶点是新生成的，颜色不一定准，统一重新转色最稳
+    # Poisson creates new vertices whose color may be off, so re-transfer to be safe
     mesh = transfer_colors(mesh, pcd)
 
-    print(f"[4/4] 保存 {args.out}")
+    print(f"[4/4] saving {args.out}")
     write_mesh(mesh, args.out)
-    print(f"      顶点 {len(mesh.vertices):,}, 面 {len(mesh.triangles):,}, "
+    print(f"      vertices {len(mesh.vertices):,}, faces {len(mesh.triangles):,}, "
           f"has_vertex_color={mesh.has_vertex_colors()}")
 
     if args.simplify > 0:
@@ -139,9 +140,9 @@ def main():
         lite.compute_vertex_normals()
         lite_path = Path(args.out).with_name(Path(args.out).stem + "_lite.ply")
         write_mesh(lite, lite_path)
-        print(f"      简化版 {lite_path} ({target:,} 面，游戏引擎用)")
+        print(f"      decimated version {lite_path} ({target:,} faces, for game engines)")
 
-    print("\n完成。用 tools/view.py 查看，或拖进 MeshLab/CloudCompare。")
+    print("\nDone. View with tools/view.py, or drag into MeshLab/CloudCompare.")
 
 
 if __name__ == "__main__":
