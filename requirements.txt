@@ -1,5 +1,6 @@
 numpy
 open3d
-rosbags
 tqdm
+# 仅 tools/inspect_bag.py 调试原始 bag 时需要：
+rosbags
 pyyaml
